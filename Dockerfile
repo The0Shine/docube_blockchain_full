@@ -58,7 +58,8 @@ RUN mkdir -p /app/config
 # Copy entrypoints
 COPY deployments/docker/entrypoint-init.sh    /entrypoint-init.sh
 COPY deployments/docker/entrypoint-service.sh /entrypoint-service.sh
-RUN chmod +x /entrypoint-init.sh /entrypoint-service.sh ./scripts/*.sh
+RUN chmod +x /entrypoint-init.sh /entrypoint-service.sh \
+    && find ./scripts -name "*.sh" -exec chmod +x {} \;
 
 # Copy cryptogen configs to a safe location (not overlaid by volume mount)
 COPY network/organizations/cryptogen/ /fabric/cryptogen-configs/

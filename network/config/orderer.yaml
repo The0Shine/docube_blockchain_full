@@ -1,0 +1,91 @@
+###############################################################################
+#   Orderer configuration — minimal orderer.yaml for Hyperledger Fabric 2.x
+#   Used by peer CLI tools (not the running orderer) when FABRIC_CFG_PATH
+#   points to this directory. Required alongside core.yaml.
+###############################################################################
+
+General:
+    ListenAddress: 127.0.0.1
+    ListenPort: 7050
+    TLS:
+        Enabled: false
+        PrivateKey: tls/server.key
+        Certificate: tls/server.crt
+        RootCAs:
+            - tls/ca.crt
+        ClientAuthRequired: false
+        ClientRootCAs:
+    Keepalive:
+        ServerMinInterval: 60s
+        ServerInterval: 7200s
+        ServerTimeout: 20s
+    MaxRecvMsgSize: 104857600
+    MaxSendMsgSize: 104857600
+    Cluster:
+        SendBufferSize: 20
+        ClientCertificate:
+        ClientPrivateKey:
+        ListenPort:
+        ListenAddress:
+        ServerCertificate:
+        ServerPrivateKey:
+        ReplicationPolicy: BFT
+    BootstrapMethod: none
+    GenesisFile: genesisblock
+    LocalMSPDir: msp
+    LocalMSPID: OrdererMSP
+    Profile:
+        Enabled: false
+        Address: 0.0.0.0:6060
+    BCCSP:
+        Default: SW
+        SW:
+            Hash: SHA2
+            Security: 256
+            FileKeyStore:
+                KeyStore:
+        PKCS11:
+            Library:
+            Label:
+            Pin:
+            Hash:
+            Security:
+    Authentication:
+        TimeWindow: 15m
+
+FileLedger:
+    Location: /var/hyperledger/orderer
+
+Operations:
+    ListenAddress: 127.0.0.1:8443
+    TLS:
+        Enabled: false
+        Certificate:
+        PrivateKey:
+        ClientAuthRequired: false
+        ClientRootCAs: []
+
+Metrics:
+    Provider: disabled
+    Statsd:
+        Network: udp
+        Address: 127.0.0.1:8125
+        WriteInterval: 30s
+        Prefix:
+
+Admin:
+    ListenAddress: 127.0.0.1:9443
+    TLS:
+        Enabled: false
+        Certificate:
+        PrivateKey:
+        ClientAuthRequired: false
+        ClientRootCAs: []
+
+ChannelParticipation:
+    Enabled: false
+    MaxRequestBodySize: 1 MB
+
+Consensus:
+    WALDir: /var/hyperledger/orderer/etcdraft/wal
+    SnapDir: /var/hyperledger/orderer/etcdraft/snapshot
