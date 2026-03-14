@@ -11,8 +11,8 @@
 #   docker compose pull && docker compose up -d
 #
 # Official images (tự pull, không cần build):
-#   hyperledger/fabric-orderer:latest
-#   hyperledger/fabric-peer:latest
+#   hyperledger/fabric-orderer:2.5
+#   hyperledger/fabric-peer:2.5
 #   couchdb:3.3.2
 #
 # FIX:
@@ -90,7 +90,7 @@ services:
 
   orderer.docube.com:
     container_name: orderer.docube.com
-    image: hyperledger/fabric-orderer:latest
+    image: hyperledger/fabric-orderer:2.5
     labels:
       service: hyperledger-fabric
     environment:
@@ -170,7 +170,7 @@ services:
 
   peer0.adminorg.docube.com:
     container_name: peer0.adminorg.docube.com
-    image: hyperledger/fabric-peer:latest
+    image: hyperledger/fabric-peer:2.5
     labels:
       service: hyperledger-fabric
     environment:
@@ -214,10 +214,11 @@ services:
         # Nếu đã có crypto từ lần chạy trước (restart) thì bỏ qua bước copy
         if [ ! -f "$${MSP_DEST}/signcerts/peer0.adminorg.docube.com-cert.pem" ]; then
           echo "[PEER-ADMINORG] Waiting for crypto material from fabric-init..."
-          while [ ! -f "$${CRYPTO}/msp/signcerts/peer0.adminorg.docube.com-cert.pem" ]; do
+          while [ ! -f "/var/hyperledger/crypto/.crypto-ready" ]; do
             sleep 3
           done
           echo "[PEER-ADMINORG] Crypto ready, copying to persistent location..."
+          rm -rf "$${MSP_DEST}" "$${TLS_DEST}"
           mkdir -p "$${MSP_DEST}" "$${TLS_DEST}"
           cp -rL "$${CRYPTO}/msp/." "$${MSP_DEST}/"
           cp -rL "$${CRYPTO}/tls/." "$${TLS_DEST}/"
@@ -251,7 +252,7 @@ services:
 
   peer0.userorg.docube.com:
     container_name: peer0.userorg.docube.com
-    image: hyperledger/fabric-peer:latest
+    image: hyperledger/fabric-peer:2.5
     labels:
       service: hyperledger-fabric
     environment:
@@ -295,10 +296,11 @@ services:
         # Nếu đã có crypto từ lần chạy trước (restart) thì bỏ qua bước copy
         if [ ! -f "$${MSP_DEST}/signcerts/peer0.userorg.docube.com-cert.pem" ]; then
           echo "[PEER-USERORG] Waiting for crypto material from fabric-init..."
-          while [ ! -f "$${CRYPTO}/msp/signcerts/peer0.userorg.docube.com-cert.pem" ]; do
+          while [ ! -f "/var/hyperledger/crypto/.crypto-ready" ]; do
             sleep 3
           done
           echo "[PEER-USERORG] Crypto ready, copying to persistent location..."
+          rm -rf "$${MSP_DEST}" "$${TLS_DEST}"
           mkdir -p "$${MSP_DEST}" "$${TLS_DEST}"
           cp -rL "$${CRYPTO}/msp/." "$${MSP_DEST}/"
           cp -rL "$${CRYPTO}/tls/." "$${TLS_DEST}/"

@@ -143,6 +143,17 @@ generateCrypto() {
     --output="${CRYPTO_BASE}"
 
   success "Crypto material generated"
+
+  # Remove admincerts from peer local MSPs — not needed with NodeOUs enabled.
+  # Newer cryptogen versions place certs here without proper OU extensions,
+  # which causes peer MSP validation to fail. NodeOUs identifies admins by
+  # OU=admin in the cert subject, not by admincerts/ presence.
+  info "Clearing peer local MSP admincerts (NodeOUs mode)..."
+  find "${CRYPTO_BASE}/peerOrganizations" -path "*/peers/*/msp/admincerts/*" -delete 2>/dev/null || true
+  success "admincerts cleared"
+
+  # Signal that crypto is fully ready (admincerts cleared) — peers wait for this marker
+  touch "${CRYPTO_BASE}/.crypto-ready"
 }
 
 # =============================================================================

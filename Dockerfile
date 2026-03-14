@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /blockchain-service ./cmd/server
 
 # ── Stage 2: Final image (Fabric tools + Go binary) ───────────────────────────
-FROM hyperledger/fabric-tools:latest
+FROM hyperledger/fabric-tools:2.5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
@@ -45,8 +45,7 @@ COPY network/config/     ./config/
 COPY network/organizations/cryptogen/ ./organizations/cryptogen/
 COPY network/compose/docker/peercfg/  ./peercfg/
 
-# Copy scripts & chaincode
-COPY network/scripts/    ./scripts/
+# Copy chaincode
 COPY network/chaincode/  ./chaincode/
 
 # Copy service config
@@ -58,8 +57,7 @@ RUN mkdir -p /app/config
 # Copy entrypoints
 COPY deployments/docker/entrypoint-init.sh    /entrypoint-init.sh
 COPY deployments/docker/entrypoint-service.sh /entrypoint-service.sh
-RUN chmod +x /entrypoint-init.sh /entrypoint-service.sh \
-    && find ./scripts -name "*.sh" -exec chmod +x {} \;
+RUN chmod +x /entrypoint-init.sh /entrypoint-service.sh
 
 # Copy cryptogen configs to a safe location (not overlaid by volume mount)
 COPY network/organizations/cryptogen/ /fabric/cryptogen-configs/
