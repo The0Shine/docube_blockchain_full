@@ -1,0 +1,23 @@
+# Patch image: rebuild only the Go service binary and overlay onto existing image.
+# Use this when network/scripts and network/config are not present locally.
+#
+#   docker build -f Dockerfile.patch -t horob1/docube-blockchain:latest .
+#   docker compose up -d --no-deps blockchain-service
+
+FROM golang:1.23-alpine AS go-builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY service/go.mod service/go.sum ./
+RUN go mod download
+
+COPY service/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /blockchain-service ./cmd/server
+
+# Layer the new binary on top of the existing full image (no network scripts needed)
+FROM horob1/docube-blockchain:latest
+
+COPY --from=go-builder /blockchain-service /usr/local/bin/blockchain-service

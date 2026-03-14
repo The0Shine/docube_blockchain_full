@@ -1,0 +1,30 @@
+# Binaries
+bin/
+*.exe
+
+# Go
+go.work.sum
+
+
+# Network generated artifacts
+network/organizations/peerOrganizations/
+network/organizations/ordererOrganizations/
+network/channel-artifacts/*.block
+network/system-genesis-block/
+network/log.txt
+network/*.tar.gz
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Docker volumes
+docker-data/

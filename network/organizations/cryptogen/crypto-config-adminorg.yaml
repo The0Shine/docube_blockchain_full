@@ -1,0 +1,20 @@
+# Copyright Docube System. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# ---------------------------------------------------------------------------
+# AdminOrg - System Admin Organization
+# Có quyền write, deploy chaincode, quản trị mạng
+# ---------------------------------------------------------------------------
+PeerOrgs:
+  - Name: AdminOrg
+    Domain: adminorg.docube.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - peer0.adminorg.docube.com
+    Users:
+      Count: 1

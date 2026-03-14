@@ -1,0 +1,49 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build outputs
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test outputs
+*.test
+coverage.out
+coverage.html
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Wallet (contains private keys - never commit!)
+wallet/
+
+# Temporary files
+tmp/
+temp/
+
+# Generated files
+*.gen.go
+
+# Connection profiles with secrets
+config/*-secret.yaml

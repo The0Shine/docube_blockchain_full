@@ -1,0 +1,416 @@
+# =============================================================================
+# Docube Blockchain — docker compose up -d
+# =============================================================================
+# Chỉ cần 1 lệnh để chạy toàn bộ hệ thống blockchain.
+#
+# Images cần build/push lên Docker Hub (chỉ 1 custom image):
+#   docker build -t horob1/docube-blockchain:latest .
+#   docker push horob1/docube-blockchain:latest
+#
+# Deploy trên server mới:
+#   docker compose pull && docker compose up -d
+#
+# Official images (tự pull, không cần build):
+#   hyperledger/fabric-orderer:latest
+#   hyperledger/fabric-peer:latest
+#   couchdb:3.3.2
+#
+# FIX:
+#   - Dùng cp -r thay vì ln -sfn để tránh symlink bị mất sau restart
+#   - fabric-init tự chờ orderer/peers healthy bên trong script
+#   - fabric-init không depends_on orderer/peers nữa (tránh deadlock)
+#   - orderer/peers dùng named volume riêng để lưu crypto persistent
+# =============================================================================
+
+volumes:
+  # Fabric node data
+  orderer.docube.com:
+  peer0.adminorg.docube.com:
+  peer0.userorg.docube.com:
+  couchdb0.adminorg:
+  couchdb0.userorg:
+  # Shared between init → peers → service
+  fabric-crypto:
+  fabric-channel-artifacts:
+
+networks:
+  docube:
+    name: docube_network
+  horob1_docub:
+    external: true   # Shared network: Redis + Kafka (managed by Redis/ và Message-Queue/)
+
+services:
+  # ===========================================================================
+  # CouchDB — state database cho peers
+  # ===========================================================================
+
+  couchdb0.adminorg:
+    container_name: couchdb0.adminorg
+    image: couchdb:3.3.2
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb0.adminorg:/opt/couchdb/data
+    networks:
+      - docube
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/_up"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  couchdb0.userorg:
+    container_name: couchdb0.userorg
+    image: couchdb:3.3.2
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "7984:5984"
+    volumes:
+      - couchdb0.userorg:/opt/couchdb/data
+    networks:
+      - docube
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/_up"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Orderer
+  # FIX: dùng cp -r thay vì ln -sfn → crypto persistent sau restart
+  #      không depends_on fabric-init (fabric-init mới depends_on orderer)
+  # ===========================================================================
+
+  orderer.docube.com:
+    container_name: orderer.docube.com
+    image: hyperledger/fabric-orderer:latest
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=none
+      - ORDERER_CHANNELPARTICIPATION_ENABLED=true
+      - ORDERER_ADMIN_TLS_ENABLED=true
+      - ORDERER_ADMIN_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_ADMIN_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_ADMIN_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_TLS_CLIENTROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_LISTENADDRESS=0.0.0.0:7053
+      - ORDERER_OPERATIONS_LISTENADDRESS=0.0.0.0:9443
+    working_dir: /root
+    entrypoint:
+      - sh
+      - -c
+      - |
+        CRYPTO=/var/hyperledger/crypto/ordererOrganizations/docube.com/orderers/orderer.docube.com
+        MSP_DEST=/var/hyperledger/orderer/msp
+        TLS_DEST=/var/hyperledger/orderer/tls
+
+        # Nếu đã có crypto từ lần chạy trước (restart) thì bỏ qua bước copy
+        if [ ! -f "$${MSP_DEST}/signcerts/orderer.docube.com-cert.pem" ]; then
+          echo "[ORDERER] Waiting for crypto material from fabric-init..."
+          while [ ! -f "$${CRYPTO}/msp/signcerts/orderer.docube.com-cert.pem" ]; do
+            sleep 3
+          done
+          echo "[ORDERER] Crypto ready, copying to persistent volume..."
+          mkdir -p "$${MSP_DEST}" "$${TLS_DEST}"
+          cp -rL "$${CRYPTO}/msp/." "$${MSP_DEST}/"
+          cp -rL "$${CRYPTO}/tls/." "$${TLS_DEST}/"
+          echo "[ORDERER] Crypto copied successfully."
+        else
+          echo "[ORDERER] Crypto already present (restart case), skipping copy."
+        fi
+
+        exec orderer
+    volumes:
+      - fabric-crypto:/var/hyperledger/crypto:ro
+      - orderer.docube.com:/var/hyperledger/orderer
+    ports:
+      - "7050:7050"
+      - "7053:7053"
+      - "9443:9443"
+    networks:
+      - docube
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "[ -f /var/hyperledger/orderer/msp/signcerts/orderer.docube.com-cert.pem ]",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # ===========================================================================
+  # Peers
+  # FIX: dùng cp -r thay vì ln -sfn → crypto persistent sau restart
+  # ===========================================================================
+
+  peer0.adminorg.docube.com:
+    container_name: peer0.adminorg.docube.com
+    image: hyperledger/fabric-peer:latest
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/peercfg
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.adminorg.docube.com
+      - CORE_PEER_ADDRESS=peer0.adminorg.docube.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.adminorg.docube.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.adminorg.docube.com:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.adminorg.docube.com:7051
+      - CORE_PEER_LOCALMSPID=AdminOrgMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:9444
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docube_network
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.adminorg:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - fabric-crypto:/var/hyperledger/crypto:ro
+      - peer0.adminorg.docube.com:/var/hyperledger/production
+      - ./network/compose/docker/peercfg:/etc/hyperledger/peercfg:ro
+    working_dir: /root
+    entrypoint:
+      - sh
+      - -c
+      - |
+        CRYPTO=/var/hyperledger/crypto/peerOrganizations/adminorg.docube.com/peers/peer0.adminorg.docube.com
+        MSP_DEST=/etc/hyperledger/fabric/msp
+        TLS_DEST=/etc/hyperledger/fabric/tls
+
+        # Nếu đã có crypto từ lần chạy trước (restart) thì bỏ qua bước copy
+        if [ ! -f "$${MSP_DEST}/signcerts/peer0.adminorg.docube.com-cert.pem" ]; then
+          echo "[PEER-ADMINORG] Waiting for crypto material from fabric-init..."
+          while [ ! -f "$${CRYPTO}/msp/signcerts/peer0.adminorg.docube.com-cert.pem" ]; do
+            sleep 3
+          done
+          echo "[PEER-ADMINORG] Crypto ready, copying to persistent location..."
+          mkdir -p "$${MSP_DEST}" "$${TLS_DEST}"
+          cp -rL "$${CRYPTO}/msp/." "$${MSP_DEST}/"
+          cp -rL "$${CRYPTO}/tls/." "$${TLS_DEST}/"
+          echo "[PEER-ADMINORG] Crypto copied successfully."
+        else
+          echo "[PEER-ADMINORG] Crypto already present (restart case), skipping copy."
+        fi
+
+        exec peer node start
+    ports:
+      - "7051:7051"
+      - "9444:9444"
+    networks:
+      - docube
+    depends_on:
+      couchdb0.adminorg:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "[ -f /etc/hyperledger/fabric/msp/signcerts/peer0.adminorg.docube.com-cert.pem ]",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  peer0.userorg.docube.com:
+    container_name: peer0.userorg.docube.com
+    image: hyperledger/fabric-peer:latest
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/peercfg
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.userorg.docube.com
+      - CORE_PEER_ADDRESS=peer0.userorg.docube.com:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.userorg.docube.com:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.userorg.docube.com:9051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.userorg.docube.com:9051
+      - CORE_PEER_LOCALMSPID=UserOrgMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:9445
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docube_network
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.userorg:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - fabric-crypto:/var/hyperledger/crypto:ro
+      - peer0.userorg.docube.com:/var/hyperledger/production
+      - ./network/compose/docker/peercfg:/etc/hyperledger/peercfg:ro
+    working_dir: /root
+    entrypoint:
+      - sh
+      - -c
+      - |
+        CRYPTO=/var/hyperledger/crypto/peerOrganizations/userorg.docube.com/peers/peer0.userorg.docube.com
+        MSP_DEST=/etc/hyperledger/fabric/msp
+        TLS_DEST=/etc/hyperledger/fabric/tls
+
+        # Nếu đã có crypto từ lần chạy trước (restart) thì bỏ qua bước copy
+        if [ ! -f "$${MSP_DEST}/signcerts/peer0.userorg.docube.com-cert.pem" ]; then
+          echo "[PEER-USERORG] Waiting for crypto material from fabric-init..."
+          while [ ! -f "$${CRYPTO}/msp/signcerts/peer0.userorg.docube.com-cert.pem" ]; do
+            sleep 3
+          done
+          echo "[PEER-USERORG] Crypto ready, copying to persistent location..."
+          mkdir -p "$${MSP_DEST}" "$${TLS_DEST}"
+          cp -rL "$${CRYPTO}/msp/." "$${MSP_DEST}/"
+          cp -rL "$${CRYPTO}/tls/." "$${TLS_DEST}/"
+          echo "[PEER-USERORG] Crypto copied successfully."
+        else
+          echo "[PEER-USERORG] Crypto already present (restart case), skipping copy."
+        fi
+
+        exec peer node start
+    ports:
+      - "9051:9051"
+      - "9445:9445"
+    networks:
+      - docube
+    depends_on:
+      couchdb0.userorg:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "[ -f /etc/hyperledger/fabric/msp/signcerts/peer0.userorg.docube.com-cert.pem ]",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # ===========================================================================
+  # Fabric Init — chạy 1 lần để bootstrap toàn bộ network
+  # FIX:
+  #   - KHÔNG depends_on orderer/peers nữa (tránh deadlock)
+  #   - Tự chờ orderer/peers healthy bên trong entrypoint-init.sh
+  #   - Chỉ depends_on couchdb (cần healthy trước)
+  # ===========================================================================
+
+  fabric-init:
+    container_name: docube-fabric-init
+    image: horob1/docube-blockchain:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/entrypoint-init.sh"]
+    environment:
+      - CHANNEL_NAME=docubechannel
+      - CC_NAME=document_nft_cc
+      - CC_VERSION=1.0
+      - CC_SEQUENCE=1
+      - MAX_RETRY=10
+      - CLI_DELAY=3
+    volumes:
+      - fabric-crypto:/fabric/organizations
+      - fabric-channel-artifacts:/fabric/channel-artifacts
+      - /var/run/docker.sock:/host/var/run/docker.sock
+    networks:
+      - docube
+    depends_on:
+      couchdb0.adminorg:
+        condition: service_healthy
+      couchdb0.userorg:
+        condition: service_healthy
+
+  # ===========================================================================
+  # Blockchain Service — cùng image, khác entrypoint
+  # Đợi fabric-init hoàn thành rồi mới start
+  # ===========================================================================
+
+  blockchain-service:
+    container_name: docube-blockchain-service
+    image: horob1/docube-blockchain:latest
+    entrypoint: ["/entrypoint-service.sh"]
+    restart: unless-stopped
+    ports:
+      - "8082:8080"   # Expose ra host để Gateway (chạy trên Windows) có thể reach (8080 dùng bởi Gateway)
+    volumes:
+      - fabric-crypto:/crypto:ro
+    environment:
+      - FABRIC_CRYPTO_PATH=/crypto/peerOrganizations/adminorg.docube.com
+      - FABRIC_PEER_ENDPOINT=peer0.adminorg.docube.com:7051
+      - FABRIC_GATEWAY_PEER=peer0.adminorg.docube.com
+      - FABRIC_CHANNEL_NAME=docubechannel
+      - FABRIC_CHAINCODE_NAME=document_nft_cc
+      - FABRIC_MSP_ID=AdminOrgMSP
+      - FABRIC_CERT_PATH=users/User1@adminorg.docube.com/msp/signcerts/User1@adminorg.docube.com-cert.pem
+      - FABRIC_KEY_DIR=users/User1@adminorg.docube.com/msp/keystore
+      - FABRIC_TLS_CERT_PATH=peers/peer0.adminorg.docube.com/tls/ca.crt
+      - KAFKA_BROKERS=kafka:7094           # Internal SASL listener (trong horob1_docub network)
+      - KAFKA_GROUP_ID=blockchain-service-group
+      - KAFKA_SASL_ENABLED=true
+      - KAFKA_SASL_USERNAME=horob1
+      - KAFKA_SASL_PASSWORD=2410
+      - REDIS_ADDR=redis:6379              # Service name 'redis' trong horob1_docub network
+      - REDIS_PASSWORD=2410
+      - REDIS_DB=1
+      - REDIS_TTL=900
+      - EUREKA_SERVER_URL=http://host.docker.internal:9000/eureka  # Discovery Server chạy local
+      - EUREKA_INSTANCE_IP=127.0.0.1      # Override hostname khi đăng ký Eureka → Gateway dùng localhost:8082
+      - EUREKA_INSTANCE_PORT=8082         # Port expose ra host (8082 host → 8080 container)
+      - APP_PORT=8080
+      - ENV=docker
+    networks:
+      - docube       # Kết nối với Fabric peers/orderer
+      - horob1_docub # Kết nối với Redis + Kafka
+    depends_on:
+      fabric-init:
+        condition: service_completed_successfully
+      orderer.docube.com:
+        condition: service_healthy
+      peer0.adminorg.docube.com:
+        condition: service_healthy
+      peer0.userorg.docube.com:
+        condition: service_healthy

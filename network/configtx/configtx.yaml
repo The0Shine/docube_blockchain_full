@@ -1,0 +1,201 @@
+# Copyright Docube System. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+---
+################################################################################
+#
+#   Section: Organizations
+#
+#   Định nghĩa các tổ chức trong mạng Docube:
+#   - OrdererOrg: Orderer organization
+#   - AdminOrg: System admin organization (write permission)
+#   - UserOrg: User organization (read-only permission)
+#
+################################################################################
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: ../organizations/ordererOrganizations/docube.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+    OrdererEndpoints:
+      - orderer.docube.com:7050
+
+  - &AdminOrg
+    # AdminOrg - System Admin Organization
+    # Có quyền write, deploy chaincode, quản trị mạng
+    Name: AdminOrgMSP
+    ID: AdminOrgMSP
+    MSPDir: ../organizations/peerOrganizations/adminorg.docube.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('AdminOrgMSP.admin', 'AdminOrgMSP.peer', 'AdminOrgMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('AdminOrgMSP.admin', 'AdminOrgMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('AdminOrgMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('AdminOrgMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.adminorg.docube.com
+        Port: 7051
+
+  - &UserOrg
+    # UserOrg - User Participant Organization
+    # Chỉ có quyền query (read-only)
+    Name: UserOrgMSP
+    ID: UserOrgMSP
+    MSPDir: ../organizations/peerOrganizations/userorg.docube.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('UserOrgMSP.admin', 'UserOrgMSP.peer', 'UserOrgMSP.client')"
+      Writers:
+        Type: Signature
+        # UserOrg không có quyền write - nhưng vẫn cần policy để join channel
+        Rule: "OR('UserOrgMSP.admin')"
+      Admins:
+        Type: Signature
+        Rule: "OR('UserOrgMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('UserOrgMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.userorg.docube.com
+        Port: 9051
+
+################################################################################
+#
+#   SECTION: Capabilities
+#
+################################################################################
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+################################################################################
+#
+#   SECTION: Application
+#
+################################################################################
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      # Cho phép cả 2 org gửi proposals (queries và invokes)
+      # Việc kiểm soát write sẽ thông qua Endorsement policy
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      # Cả 2 org đều có thể làm admin operations (approve chaincode)
+      Rule: "ANY Admins"
+    LifecycleEndorsement:
+      Type: Signature
+      # Chỉ AdminOrg có thể commit chaincode definition
+      Rule: "OR('AdminOrgMSP.peer')"
+    Endorsement:
+      Type: Signature
+      # Chỉ AdminOrg endorsement - đây là nơi kiểm soát quyền write
+      Rule: "OR('AdminOrgMSP.peer')"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+################################################################################
+#
+#   SECTION: Orderer
+#
+################################################################################
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.docube.com:7050
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+################################################################################
+#
+#   CHANNEL
+#
+################################################################################
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      # Cho phép cả 2 org gửi transactions
+      Rule: "ANY Writers"
+    Admins:
+      Type: Signature
+      # Chỉ AdminOrg là channel admin (Setup channel/Config updates)
+      Rule: "OR('AdminOrgMSP.admin')"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+################################################################################
+#
+#   Profile: DocubeChannel
+#
+################################################################################
+Profiles:
+  DocubeChannel:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      OrdererType: etcdraft
+      EtcdRaft:
+        Consenters:
+          - Host: orderer.docube.com
+            Port: 7050
+            ClientTLSCert: ../organizations/ordererOrganizations/docube.com/orderers/orderer.docube.com/tls/server.crt
+            ServerTLSCert: ../organizations/ordererOrganizations/docube.com/orderers/orderer.docube.com/tls/server.crt
+      Organizations:
+        - *OrdererOrg
+      Capabilities: *OrdererCapabilities
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *AdminOrg
+        - *UserOrg
+      Capabilities: *ApplicationCapabilities

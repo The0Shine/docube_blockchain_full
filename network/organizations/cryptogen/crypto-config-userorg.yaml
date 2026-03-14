@@ -1,0 +1,20 @@
+# Copyright Docube System. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# ---------------------------------------------------------------------------
+# UserOrg - User Participant Organization
+# Chỉ có quyền query (read-only)
+# ---------------------------------------------------------------------------
+PeerOrgs:
+  - Name: UserOrg
+    Domain: userorg.docube.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - peer0.userorg.docube.com
+    Users:
+      Count: 1

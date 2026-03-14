@@ -1,0 +1,13 @@
+# Fabric SDK Configuration
+fabric:
+  channel_name: docubechannel
+  chaincode_name: document_nft_cc
+  msp_id: AdminOrgMSP
+  peer_endpoint: localhost:7051
+  gateway_peer: peer0.adminorg.docube.com
+
+  # Crypto material paths (relative to service/ directory)
+  crypto_path: ../network/organizations/peerOrganizations/adminorg.docube.com
+  cert_path: users/User1@adminorg.docube.com/msp/signcerts/User1@adminorg.docube.com-cert.pem
+  key_dir: users/User1@adminorg.docube.com/msp/keystore
+  tls_cert_path: peers/peer0.adminorg.docube.com/tls/ca.crt

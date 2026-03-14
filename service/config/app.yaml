@@ -1,0 +1,30 @@
+# Application Configuration
+app:
+  name: fabric-gateway-service
+  port: 8081
+  env: dev
+
+# Eureka Service Discovery
+# WSL2 host IP (Windows gateway from Ubuntu) = 172.31.16.1
+eureka:
+  server_url: http://172.31.16.1:9000/eureka
+  heartbeat_interval: 30  # seconds
+  retry_interval: 5       # seconds on failure
+
+# Kafka Consumer Config
+# Brokers: use Windows host IP from WSL2 (172.31.16.1) or localhost if running in Windows
+kafka:
+  brokers:
+    - "172.31.16.1:7092"
+  group_id: "blockchain-service-group"
+  sasl_enabled: true
+  sasl_username: "horob1"
+  sasl_password: "2410"
+
+# Redis Cache Config
+# Same Redis instance as Gateway (db=1 to avoid collision with Gateway's db=0)
+redis:
+  addr: "172.31.16.1:6379"
+  password: "2410"
+  db: 1
+  ttl: 900  # Cache TTL in seconds (15 minutes)
