@@ -13,7 +13,10 @@
 # =============================================================================
 
 # ── Stage 1: Build Go service ─────────────────────────────────────────────────
-FROM golang:1.23-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS go-builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 RUN apk add --no-cache git ca-certificates
 
@@ -23,7 +26,7 @@ COPY service/go.mod service/go.sum ./
 RUN go mod download
 
 COPY service/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /blockchain-service ./cmd/server
 
 # ── Stage 2: Final image (Fabric tools + Go binary) ───────────────────────────

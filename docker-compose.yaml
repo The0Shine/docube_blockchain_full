@@ -3,7 +3,14 @@
 # =============================================================================
 # Chỉ cần 1 lệnh để chạy toàn bộ hệ thống blockchain.
 #
-# Images cần build/push lên Docker Hub (chỉ 1 custom image):
+# Trước khi chạy:
+#   1. Tạo external network (nếu chưa có):
+#        docker network create horob1_docub
+#   2. Copy .env.example → .env và chỉnh sửa nếu cần:
+#        cp .env.example .env
+#   3. Đảm bảo Redis + Kafka đã chạy trong network horob1_docub
+#
+# Build image (chỉ cần trên máy dev):
 #   docker build -t horob1/docube-blockchain:latest .
 #   docker push horob1/docube-blockchain:latest
 #
@@ -14,12 +21,6 @@
 #   hyperledger/fabric-orderer:2.5
 #   hyperledger/fabric-peer:2.5
 #   couchdb:3.3.2
-#
-# FIX:
-#   - Dùng cp -r thay vì ln -sfn để tránh symlink bị mất sau restart
-#   - fabric-init tự chờ orderer/peers healthy bên trong script
-#   - fabric-init không depends_on orderer/peers nữa (tránh deadlock)
-#   - orderer/peers dùng named volume riêng để lưu crypto persistent
 # =============================================================================
 
 volumes:
@@ -48,8 +49,8 @@ services:
     container_name: couchdb0.adminorg
     image: couchdb:3.3.2
     environment:
-      - COUCHDB_USER=admin
-      - COUCHDB_PASSWORD=adminpw
+      - COUCHDB_USER=${COUCHDB_USER:-admin}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD:-adminpw}
     ports:
       - "5984:5984"
     volumes:
@@ -67,8 +68,8 @@ services:
     container_name: couchdb0.userorg
     image: couchdb:3.3.2
     environment:
-      - COUCHDB_USER=admin
-      - COUCHDB_PASSWORD=adminpw
+      - COUCHDB_USER=${COUCHDB_USER:-admin}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD:-adminpw}
     ports:
       - "7984:5984"
     volumes:
@@ -154,9 +155,9 @@ services:
       test:
         [
           "CMD",
-          "sh",
+          "bash",
           "-c",
-          "[ -f /var/hyperledger/orderer/msp/signcerts/orderer.docube.com-cert.pem ]",
+          "[ -f /var/hyperledger/orderer/msp/signcerts/orderer.docube.com-cert.pem ] && echo > /dev/tcp/localhost/7050",
         ]
       interval: 10s
       timeout: 5s
@@ -195,8 +196,8 @@ services:
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docube_network
       - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.adminorg:5984
-      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
-      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=${COUCHDB_USER:-admin}
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=${COUCHDB_PASSWORD:-adminpw}
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock
       - fabric-crypto:/var/hyperledger/crypto:ro
@@ -277,8 +278,8 @@ services:
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docube_network
       - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0.userorg:5984
-      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
-      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=${COUCHDB_USER:-admin}
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=${COUCHDB_PASSWORD:-adminpw}
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock
       - fabric-crypto:/var/hyperledger/crypto:ro
@@ -343,9 +344,8 @@ services:
   fabric-init:
     container_name: docube-fabric-init
     image: horob1/docube-blockchain:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Không khai báo build ở đây để tránh race condition với blockchain-service
+    # Image được build bởi blockchain-service service
     entrypoint: ["/entrypoint-init.sh"]
     environment:
       - CHANNEL_NAME=docubechannel
@@ -374,10 +374,15 @@ services:
   blockchain-service:
     container_name: docube-blockchain-service
     image: horob1/docube-blockchain:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     entrypoint: ["/entrypoint-service.sh"]
     restart: unless-stopped
     ports:
-      - "8082:8080"   # Expose ra host để Gateway (chạy trên Windows) có thể reach (8080 dùng bởi Gateway)
+      - "${BLOCKCHAIN_SERVICE_PORT:-8082}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Cần cho Linux (Docker Desktop tự có)
     volumes:
       - fabric-crypto:/crypto:ro
     environment:
@@ -390,18 +395,18 @@ services:
       - FABRIC_CERT_PATH=users/User1@adminorg.docube.com/msp/signcerts/User1@adminorg.docube.com-cert.pem
       - FABRIC_KEY_DIR=users/User1@adminorg.docube.com/msp/keystore
       - FABRIC_TLS_CERT_PATH=peers/peer0.adminorg.docube.com/tls/ca.crt
-      - KAFKA_BROKERS=kafka:7094           # Internal SASL listener (trong horob1_docub network)
-      - KAFKA_GROUP_ID=blockchain-service-group
-      - KAFKA_SASL_ENABLED=true
-      - KAFKA_SASL_USERNAME=horob1
-      - KAFKA_SASL_PASSWORD=2410
-      - REDIS_ADDR=redis:6379              # Service name 'redis' trong horob1_docub network
-      - REDIS_PASSWORD=2410
-      - REDIS_DB=1
-      - REDIS_TTL=900
-      - EUREKA_SERVER_URL=http://host.docker.internal:9000/eureka  # Discovery Server chạy local
-      - EUREKA_INSTANCE_IP=127.0.0.1      # Override hostname khi đăng ký Eureka → Gateway dùng localhost:8082
-      - EUREKA_INSTANCE_PORT=8082         # Port expose ra host (8082 host → 8080 container)
+      - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:7094}
+      - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-blockchain-service-group}
+      - KAFKA_SASL_ENABLED=${KAFKA_SASL_ENABLED:-true}
+      - KAFKA_SASL_USERNAME=${KAFKA_SASL_USERNAME:-horob1}
+      - KAFKA_SASL_PASSWORD=${KAFKA_SASL_PASSWORD:-2410}
+      - REDIS_ADDR=${REDIS_ADDR:-redis:6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-2410}
+      - REDIS_DB=${REDIS_DB:-1}
+      - REDIS_TTL=${REDIS_TTL:-900}
+      - EUREKA_SERVER_URL=${EUREKA_SERVER_URL:-http://host.docker.internal:9000/eureka}
+      - EUREKA_INSTANCE_IP=${EUREKA_INSTANCE_IP:-host.docker.internal}
+      - EUREKA_INSTANCE_PORT=${BLOCKCHAIN_SERVICE_PORT:-8082}
       - APP_PORT=8080
       - ENV=docker
     networks:
